@@ -1,0 +1,115 @@
+version: "3.9"
+
+services:
+  # =========================
+  # Backend Java
+  # =========================
+  backend:
+    image: eclipse-temurin:17-jdk
+    container_name: java-backend
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    command: bash -c "./mvnw clean test"
+    depends_on:
+      - sonarqube
+    networks:
+      - devnet
+
+  # =========================
+  # Frontend Node.js
+  # =========================
+  frontend:
+    image: node:20-alpine
+    container_name: node-frontend
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    command: sh -c "npm install && npm test"
+    environment:
+      - CI=true
+    depends_on:
+      - sonarqube
+    networks:
+      - devnet
+
+  # =========================
+  # SonarQube (Server)
+  # =========================
+  sonarqube:
+    image: sonarqube:latest
+    container_name: sonarqube
+    ports:
+      - "9000:9000"
+    environment:
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+      - SONARQUBE_JDBC_USERNAME=sonar
+      - SONARQUBE_JDBC_PASSWORD=sonar
+      - SONARQUBE_JDBC_URL=jdbc:postgresql://db:5432/sonar
+    depends_on:
+      - db
+    networks:
+      - devnet
+
+  # =========================
+  # PostgreSQL (banco SonarQube)
+  # =========================
+  db:
+    image: postgres:15
+    container_name: sonar-db
+    environment:
+      - POSTGRES_USER=sonar
+      - POSTGRES_PASSWORD=sonar
+      - POSTGRES_DB=sonar
+    volumes:
+      - sonar-db-data:/var/lib/postgresql/data
+    networks:
+      - devnet
+
+  # =========================
+  # SonarScanner (Client)
+  # =========================
+  sonarscanner:
+    image: sonarsource/sonar-scanner-cli:latest
+    container_name: sonar-scanner
+    working_dir: /app
+    volumes:
+      - ./backend:/app/backend
+      - ./frontend:/app/frontend
+    depends_on:
+      - sonarqube
+    environment:
+      - SONAR_HOST_URL=http://sonarqube:9000
+      - SONAR_LOGIN=admin
+      - SONAR_PASSWORD=admin
+    command: >
+      bash -c "
+        cd backend && sonar-scanner \
+        -Dsonar.projectKey=backend \
+        -Dsonar.sources=src \
+        -Dsonar.java.binaries=target \
+        -Dsonar.host.url=$${SONAR_HOST_URL} \
+        -Dsonar.login=$${SONAR_LOGIN} \
+        -Dsonar.password=$${SONAR_PASSWORD};
+        cd ../frontend && sonar-scanner \
+        -Dsonar.projectKey=frontend \
+        -Dsonar.sources=. \
+        -Dsonar.language=js \
+        -Dsonar.tests=. \
+        -Dsonar.test.inclusions=**/*.test.js \
+        -Dsonar.host.url=$${SONAR_HOST_URL} \
+        -Dsonar.login=$${SONAR_LOGIN} \
+        -Dsonar.password=$${SONAR_PASSWORD};
+      "
+    networks:
+      - devnet
+
+# =========================
+# Volumes e Rede
+# =========================
+volumes:
+  sonar-db-data:
+
+networks:
+  devnet:
+    driver: bridge
